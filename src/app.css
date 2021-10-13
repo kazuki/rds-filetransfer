@@ -1,0 +1,60 @@
+body, html {
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  font-family: sans-serif;
+  font-size: small;
+}
+
+.navbar {
+  display: flex;
+  align-items: baseline;
+  background-color: #555;
+}
+
+.navbar a {
+  color: #fff;
+  text-align: center;
+  padding: 4px 16px;
+  text-decoration: none;
+  border-right: 1px solid #888;
+}
+
+.navbar a:hover {
+  background-color: #888;
+}
+
+div.form-block {
+  display: flex;
+  flex-direction: column;
+  margin-right: 1em;
+}
+
+input[type="number"] {
+  text-align: right;
+}
+
+.send-page {
+  padding: 8px 6px;
+}
+
+.send-page > div.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1ex;
+}
+
+.send-page input[type="file"] {
+  display: none;
+}
+.send-page .send-file-label {
+  cursor: pointer;
+  border: 1px solid #ccc;
+  padding: 6px 12px;
+}
+.send-page input[type="file"]:disabled + .send-file-label {
+  color: #ccc;
+  cursor: not-allowed;
+}
