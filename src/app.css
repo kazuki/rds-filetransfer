@@ -36,7 +36,7 @@ input[type="number"] {
   text-align: right;
 }
 
-.send-page {
+.send-page, .recv-page {
   padding: 8px 6px;
 }
 
@@ -44,6 +44,10 @@ input[type="number"] {
   display: flex;
   align-items: center;
   margin-bottom: 1ex;
+}
+
+.send-page #interval {
+  width: 6em;
 }
 
 .send-page input[type="file"] {
