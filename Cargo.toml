@@ -7,7 +7,6 @@ edition = "2021"
 yew = "0.18"
 yew-router = "0.15"
 qrcode = "0.11"
-wee_alloc = "0.4"
 js-sys = "0.3"
 quircs = "0.10"
 

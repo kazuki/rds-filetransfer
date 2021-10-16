@@ -1,12 +1,15 @@
-use yew::prelude::*;
-use yew::utils::window;
-use yew::services::console::ConsoleService;
-use web_sys::{MediaStream, HtmlAnchorElement, HtmlCanvasElement, HtmlVideoElement, CanvasRenderingContext2d, Blob, BlobPropertyBag, Url};
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
+use crate::header::{parse_header, Header, HEADER_SIZE};
 use js_sys::{Array, Uint8Array};
 use quircs::Quirc;
-use crate::header::{parse_header, Header, HEADER_SIZE};
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::{
+    Blob, BlobPropertyBag, CanvasRenderingContext2d, HtmlAnchorElement, HtmlCanvasElement,
+    HtmlVideoElement, MediaStream, Url,
+};
+use yew::prelude::*;
+use yew::services::console::ConsoleService;
+use yew::utils::window;
 
 type FnCB = Box<dyn FnMut(JsValue)>;
 
@@ -34,8 +37,16 @@ impl RecvPage {
         link.send_message(Msg::InitVideo(s.clone()));
     }
 
-    fn process(link: ComponentLink<RecvPage>, video: HtmlVideoElement, context: CanvasRenderingContext2d, w: f64, h: f64) {
-        context.draw_image_with_html_video_element(&video, 0.0, 0.0).unwrap();
+    fn process(
+        link: ComponentLink<RecvPage>,
+        video: HtmlVideoElement,
+        context: CanvasRenderingContext2d,
+        w: f64,
+        h: f64,
+    ) {
+        context
+            .draw_image_with_html_video_element(&video, 0.0, 0.0)
+            .unwrap();
         let img = context.get_image_data(0.0, 0.0, w, h).unwrap();
         let d = img.data().0;
         let hi = h as i32;
@@ -47,7 +58,8 @@ impl RecvPage {
                 let j = (y * wi + x) as usize;
                 let i = j * 4;
                 let (r, g, b) = (d[i], d[i + 1], d[i + 2]);
-                gs[j] = ((0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).clamp(0.0, 1.0) * 255.0) as u8;
+                gs[j] = ((0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).clamp(0.0, 1.0)
+                    * 255.0) as u8;
             }
         }
         let mut decoder = Quirc::default();
@@ -61,10 +73,10 @@ impl RecvPage {
                     let buf = Uint8Array::new_with_length(header.size as u32);
                     buf.copy_from(&d[HEADER_SIZE..HEADER_SIZE + header.size as usize]);
                     link.send_message(Msg::Recognized(header, buf));
-                },
+                }
                 Err(e) => {
                     ConsoleService::log(format!("ERROR: {:?}", e).as_ref());
-                },
+                }
             }
         }
         link.send_message(Msg::Enqueue);
@@ -82,7 +94,11 @@ impl RecvPage {
         let url = Url::create_object_url_with_blob(blob.as_ref()).unwrap();
 
         let doc = window().document().unwrap();
-        let a = doc.create_element("a").unwrap().dyn_into::<HtmlAnchorElement>().unwrap();
+        let a = doc
+            .create_element("a")
+            .unwrap()
+            .dyn_into::<HtmlAnchorElement>()
+            .unwrap();
         a.set_href(&url);
         a.click();
         Url::revoke_object_url(&url).unwrap();
@@ -115,15 +131,24 @@ impl Component for RecvPage {
                 self.received.clear();
                 let link = self.link.clone();
                 let cb = Closure::wrap(Box::new(move |v: JsValue| {
-                    Self::get_display_media_callback(link.clone(), v.dyn_into::<MediaStream>().unwrap());
+                    Self::get_display_media_callback(
+                        link.clone(),
+                        v.dyn_into::<MediaStream>().unwrap(),
+                    );
                 }) as FnCB);
-                let _ = window().navigator().media_devices().unwrap().get_display_media().unwrap().then(&cb);
+                let _ = window()
+                    .navigator()
+                    .media_devices()
+                    .unwrap()
+                    .get_display_media()
+                    .unwrap()
+                    .then(&cb);
                 cb.forget();
-            },
+            }
             Msg::InitVideo(s) => {
                 let video = self.video_element.cast::<HtmlVideoElement>().unwrap();
                 video.set_src_object(Some(&s));
-            },
+            }
             Msg::VideoStart | Msg::Enqueue => {
                 let link = self.link.clone();
                 let video = self.video_element.cast::<HtmlVideoElement>().unwrap();
@@ -133,23 +158,30 @@ impl Component for RecvPage {
                     Msg::VideoStart => {
                         canvas.set_height(vh as u32);
                         canvas.set_width(vw as u32);
-                    },
+                    }
                     _ => {
                         if self.timer_id < 0 {
                             return false;
                         }
-                    },
+                    }
                 }
-                let context = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
+                let context = canvas
+                    .get_context("2d")
+                    .unwrap()
+                    .unwrap()
+                    .dyn_into::<CanvasRenderingContext2d>()
+                    .unwrap();
                 let cb = Closure::wrap(Box::new(move || {
                     RecvPage::process(link.clone(), video.clone(), context.clone(), vw, vh);
                 }) as Box<dyn Fn()>);
-                self.timer_id = window().set_timeout_with_callback_and_timeout_and_arguments_0(
-                    cb.as_ref().unchecked_ref(),
-                    1,
-                ).unwrap();
+                self.timer_id = window()
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        cb.as_ref().unchecked_ref(),
+                        1,
+                    )
+                    .unwrap();
                 cb.forget();
-            },
+            }
             Msg::Recognized(header, buf) => {
                 if (header.seq == 0 && buf.length() == 0) || self.timer_id < 0 {
                     if !self.recv_ready {
@@ -179,7 +211,7 @@ impl Component for RecvPage {
                     return true;
                 }
                 return false;
-            },
+            }
         }
         true
     }
@@ -203,7 +235,11 @@ impl Component for RecvPage {
         } else if self.received_bytes == 0 {
             "送信側のデータ送出を待機中...".to_string()
         } else {
-            format!("{}バイト受信済み. 送受信QRコード数:{}", self.received_bytes, self.received.len())
+            format!(
+                "{}バイト受信済み. 送受信QRコード数:{}",
+                self.received_bytes,
+                self.received.len()
+            )
         };
         html! {
             <div class="recv-page">

@@ -1,21 +1,16 @@
-//extern crate wee_alloc;
-
-//#[global_allocator]
-//static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
+mod header;
 mod home;
+mod recv;
 mod routes;
 mod send;
-mod recv;
-mod header;
 
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-use routes::{Anchor, AppRoute};
 use home::HomePage;
-use send::SendPage;
 use recv::RecvPage;
+use routes::{Anchor, AppRoute};
+use send::SendPage;
 
 #[derive(Debug)]
 pub struct App;

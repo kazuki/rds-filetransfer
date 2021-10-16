@@ -1,13 +1,15 @@
-use qrcode::{QrCode, Color, EcLevel, Version};
+use js_sys::{ArrayBuffer, Uint8Array};
+use qrcode::{Color, EcLevel, QrCode, Version};
+use serde::Serialize;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{
+    Blob, File, FileReader, HtmlCanvasElement, HtmlElement, HtmlInputElement, InputEvent,
+};
 use yew::prelude::*;
 use yew::utils::window;
-use web_sys::{HtmlElement, HtmlCanvasElement, HtmlInputElement, File, FileReader, Blob, InputEvent};
-use js_sys::{ArrayBuffer, Uint8Array};
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen::prelude::*;
-use serde::Serialize;
 
-use crate::header::{Header, HEADER_SIZE, build_header};
+use crate::header::{build_header, Header, HEADER_SIZE};
 
 const DEFAULT_VERSION: Version = Version::Normal(40);
 const DEFAULT_INTERVAL: u16 = 500;
@@ -48,17 +50,29 @@ pub enum Msg {
 impl SendPage {
     fn render_qrcode(&self) -> Result<(), ()> {
         let canvas = self.canvas.cast::<HtmlCanvasElement>().ok_or(())?;
-        let context = canvas.get_context_with_context_options("2d", &self.cache_context_attrs).map_err(|_| ())?.ok_or(())?.dyn_into::<web_sys::CanvasRenderingContext2d>().map_err(|_| ())?;
-        let code = QrCode::with_error_correction_level(&self.data, self.ec_level).map_err(|_| ())?;
+        let context = canvas
+            .get_context_with_context_options("2d", &self.cache_context_attrs)
+            .map_err(|_| ())?
+            .ok_or(())?
+            .dyn_into::<web_sys::CanvasRenderingContext2d>()
+            .map_err(|_| ())?;
+        let code =
+            QrCode::with_error_correction_level(&self.data, self.ec_level).map_err(|_| ())?;
         let colors = code.to_colors();
         let size = (colors.len() as f64).sqrt() as u32;
         let canvas_size = size * self.pixel_size as u32;
         let rect_size = self.pixel_size as f64;
         let scaled_canvas_size = (canvas_size as f64 * self.scale) as u32;
 
-        canvas.style().set_property("height", format!("{}px", canvas_size).as_ref()).unwrap();
+        canvas
+            .style()
+            .set_property("height", format!("{}px", canvas_size).as_ref())
+            .unwrap();
         canvas.set_height(scaled_canvas_size);
-        canvas.style().set_property("width", format!("{}px", canvas_size).as_ref()).unwrap();
+        canvas
+            .style()
+            .set_property("width", format!("{}px", canvas_size).as_ref())
+            .unwrap();
         canvas.set_width(scaled_canvas_size);
         context.scale(self.scale, self.scale).unwrap();
         context.set_image_smoothing_enabled(false);
@@ -72,7 +86,12 @@ impl SendPage {
                 if colors[(y * size + x) as usize] == Color::Light {
                     continue;
                 }
-                context.fill_rect(x as f64 * rect_size, y as f64 * rect_size, rect_size, rect_size);
+                context.fill_rect(
+                    x as f64 * rect_size,
+                    y as f64 * rect_size,
+                    rect_size,
+                    rect_size,
+                );
             }
         }
 
@@ -102,9 +121,16 @@ impl SendPage {
         }) as Box<dyn Fn()>);
         reader.set_onload(Some(cb.as_ref().unchecked_ref()));
         cb.forget();
-        self.file_inflight = Some(self.file.as_ref().unwrap().slice_with_f64_and_f64(
-            cur_offset, cur_offset + read_size2).unwrap());
-        reader.read_as_array_buffer(self.file_inflight.as_ref().unwrap()).unwrap();
+        self.file_inflight = Some(
+            self.file
+                .as_ref()
+                .unwrap()
+                .slice_with_f64_and_f64(cur_offset, cur_offset + read_size2)
+                .unwrap(),
+        );
+        reader
+            .read_as_array_buffer(self.file_inflight.as_ref().unwrap())
+            .unwrap();
     }
 
     fn update_block_size_only(&mut self) {
@@ -155,7 +181,7 @@ impl Component for SendPage {
         match msg {
             Msg::Start(f) => {
                 self.start(f);
-            },
+            }
             Msg::LoadFile(reader, buf) => {
                 let read_size = buf.byte_length();
                 if read_size == 0 {
@@ -164,44 +190,63 @@ impl Component for SendPage {
                 }
                 let seq = (self.read_offset / (self.block_size - HEADER_SIZE as u16) as u64) as u32;
                 self.read_offset += read_size as u64;
-                self.file_inflight = Some(self.file.as_ref().unwrap().slice_with_f64_and_f64(
-                    self.read_offset as f64,
-                    (self.read_offset + (self.block_size - HEADER_SIZE as u16) as u64) as f64).unwrap());
+                self.file_inflight = Some(
+                    self.file
+                        .as_ref()
+                        .unwrap()
+                        .slice_with_f64_and_f64(
+                            self.read_offset as f64,
+                            (self.read_offset + (self.block_size - HEADER_SIZE as u16) as u64)
+                                as f64,
+                        )
+                        .unwrap(),
+                );
 
-                Uint8Array::new(&buf).copy_to(&mut self.data[HEADER_SIZE..HEADER_SIZE+read_size as usize]);
-                build_header(Header { seq, size: read_size as u16 }, &mut self.data[..]);
+                Uint8Array::new(&buf)
+                    .copy_to(&mut self.data[HEADER_SIZE..HEADER_SIZE + read_size as usize]);
+                build_header(
+                    Header {
+                        seq,
+                        size: read_size as u16,
+                    },
+                    &mut self.data[..],
+                );
                 self.render_qrcode().unwrap();
 
-                let reader2 = reader.clone();
                 let file_inflight2 = self.file_inflight.clone();
                 let cb = Closure::wrap(Box::new(move || {
-                    reader2.read_as_array_buffer(file_inflight2.as_ref().unwrap()).unwrap();
+                    reader
+                        .read_as_array_buffer(file_inflight2.as_ref().unwrap())
+                        .unwrap();
                 }) as Box<dyn Fn()>);
-                window().set_timeout_with_callback_and_timeout_and_arguments_0(
-                    cb.as_ref().unchecked_ref(),
-                    self.send_interval as i32
-                ).unwrap();
+                window()
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        cb.as_ref().unchecked_ref(),
+                        self.send_interval as i32,
+                    )
+                    .unwrap();
                 cb.forget();
-            },
+            }
             Msg::Final => {
-                let seq = (self.read_offset / (self.block_size - HEADER_SIZE as u16) as u64) as u32 + 1;
+                let seq =
+                    (self.read_offset / (self.block_size - HEADER_SIZE as u16) as u64) as u32 + 1;
                 self.data.clear();
                 self.data.resize(self.data.capacity(), 0);
                 build_header(Header { seq, size: 0 }, &mut self.data[..]);
                 self.render_qrcode().unwrap();
-            },
+            }
             Msg::UpdateVersion(v) => {
                 self.version = v;
                 self.update_block_size();
-            },
+            }
             Msg::UpdateECLevel(v) => {
                 self.ec_level = v;
                 self.update_block_size();
-            },
+            }
             Msg::UpdateCellSize(v) => {
                 self.pixel_size = v;
                 self.render_qrcode().unwrap();
-            },
+            }
             Msg::UpdateInterval(v) => self.send_interval = v,
         }
         true
@@ -229,11 +274,8 @@ impl Component for SendPage {
         let oninput = self.link.batch_callback(move |e: InputData| {
             let v = e.value.parse::<u16>();
             if let Some(id) = get_event_target_element_id(e.event) {
-                match id.as_str() {
-                    "interval" => {
-                        return Some(Msg::UpdateInterval(v.unwrap_or(send_interval)));
-                    },
-                    _ => {},
+                if id == "interval" {
+                    return Some(Msg::UpdateInterval(v.unwrap_or(send_interval)));
                 }
             }
             None
@@ -244,15 +286,15 @@ impl Component for SendPage {
                 match element.id().as_str() {
                     "version" => {
                         return Some(Msg::UpdateVersion(Version::Normal(v as i16)));
-                    },
+                    }
                     "ec" => {
                         if let Some(l) = to_ec_level(v) {
                             return Some(Msg::UpdateECLevel(l));
                         }
-                    },
+                    }
                     "pixel" => {
                         return Some(Msg::UpdateCellSize(v as u8));
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -271,7 +313,11 @@ impl Component for SendPage {
             None
         });
         let in_progress = self.file.is_some();
-        let selected_version = if let Version::Normal(v) = self.version { v } else { 0 };
+        let selected_version = if let Version::Normal(v) = self.version {
+            v
+        } else {
+            0
+        };
 
         html! {
             <div class="send-page">
@@ -348,7 +394,7 @@ const BINARY_SIZE_TABLE: [[u16; 4]; 40] = [
     [106, 84, 60, 44],
     [134, 106, 74, 58],
     [154, 122, 86, 64],
-    [192,152, 108, 84],
+    [192, 152, 108, 84],
     [230, 180, 130, 98],
     [271, 213, 151, 119],
     [321, 251, 177, 137],

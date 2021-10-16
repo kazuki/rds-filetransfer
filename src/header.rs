@@ -6,13 +6,10 @@ pub struct Header {
 }
 
 pub fn parse_header(b: &[u8]) -> Header {
-    let x = (b[0] as u32)
-        | ((b[1] as u32) << 8)
-        | ((b[2] as u32) << 16)
-        | ((b[3] as u32) << 24);
+    let x = (b[0] as u32) | ((b[1] as u32) << 8) | ((b[2] as u32) << 16) | ((b[3] as u32) << 24);
     Header {
         seq: x >> 12,
-        size: (x & 0xfff) as u16
+        size: (x & 0xfff) as u16,
     }
 }
 
