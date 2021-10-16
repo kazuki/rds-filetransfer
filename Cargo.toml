@@ -31,4 +31,6 @@ features = [
     "CanvasRenderingContext2d",
     "ImageData",
     "CssStyleDeclaration",
+    "TextEncoder",
+    "TextDecoder",
 ]

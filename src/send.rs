@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
     Blob, File, FileReader, HtmlCanvasElement, HtmlElement, HtmlInputElement, InputEvent,
+    TextEncoder,
 };
 use yew::prelude::*;
 use yew::utils::window;
@@ -99,13 +100,55 @@ impl SendPage {
     }
 
     fn start(&mut self, f: File) {
+        let utf8_encoder = TextEncoder::new().unwrap();
+        let utf8_name = utf8_encoder.encode_with_input(f.name().as_ref());
+        let file_size = f.size() as u64;
+        let reader = FileReader::new().unwrap();
         self.file = Some(f);
         self.read_offset = 0;
-        let reader = FileReader::new().unwrap();
-        let reader2 = reader.clone();
-        let cur_offset = self.read_offset as f64;
+        self.setup_reader_callback(&reader);
+
+        // 最初のフレームは、ファイルサイズ(8B) + ファイル名(UTF8)
+        self.data.fill(0);
+        build_header(
+            Header {
+                seq: 0,
+                size: self.block_size - HEADER_SIZE as u16,
+            },
+            &mut self.data[..],
+        );
+        for i in 0..8 {
+            self.data[HEADER_SIZE + i] = ((file_size >> (i * 8)) & 0xff) as u8;
+        }
+        self.data[HEADER_SIZE + 8..HEADER_SIZE + 8 + utf8_name.len()].copy_from_slice(&utf8_name);
+        self.render_qrcode().unwrap();
+
+        // interval[ms]後にファイル読み込みを実施するようにスケジュール
         let read_size = (self.block_size - HEADER_SIZE as u16) as f64;
-        let read_size2 = read_size;
+        self.file_inflight = Some(
+            self.file
+                .as_ref()
+                .unwrap()
+                .slice_with_f64_and_f64(0.0, read_size)
+                .unwrap(),
+        );
+        let file_inflight2 = self.file_inflight.clone();
+        let cb = Closure::wrap(Box::new(move || {
+            reader
+                .read_as_array_buffer(file_inflight2.as_ref().unwrap())
+                .unwrap();
+        }) as Box<dyn Fn()>);
+        window()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                self.send_interval as i32,
+            )
+            .unwrap();
+        cb.forget();
+    }
+
+    fn setup_reader_callback(&self, reader: &FileReader) {
+        let reader2 = reader.clone();
         let link2 = self.link.clone();
         let cb = Closure::wrap(Box::new(move || {
             if reader2.result().is_err() {
@@ -121,16 +164,6 @@ impl SendPage {
         }) as Box<dyn Fn()>);
         reader.set_onload(Some(cb.as_ref().unchecked_ref()));
         cb.forget();
-        self.file_inflight = Some(
-            self.file
-                .as_ref()
-                .unwrap()
-                .slice_with_f64_and_f64(cur_offset, cur_offset + read_size2)
-                .unwrap(),
-        );
-        reader
-            .read_as_array_buffer(self.file_inflight.as_ref().unwrap())
-            .unwrap();
     }
 
     fn update_block_size_only(&mut self) {
@@ -188,7 +221,8 @@ impl Component for SendPage {
                     self.file_inflight = None;
                     return true;
                 }
-                let seq = (self.read_offset / (self.block_size - HEADER_SIZE as u16) as u64) as u32;
+                let seq =
+                    1 + (self.read_offset / (self.block_size - HEADER_SIZE as u16) as u64) as u32;
                 self.read_offset += read_size as u64;
                 self.file_inflight = Some(
                     self.file

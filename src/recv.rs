@@ -1,15 +1,18 @@
-use crate::header::{parse_header, Header, HEADER_SIZE};
+use std::rc::Rc;
+
 use js_sys::{Array, Uint8Array};
 use quircs::Quirc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     Blob, BlobPropertyBag, CanvasRenderingContext2d, HtmlAnchorElement, HtmlCanvasElement,
-    HtmlVideoElement, MediaStream, Url,
+    HtmlVideoElement, MediaStream, TextDecoder, Url,
 };
 use yew::prelude::*;
 use yew::services::console::ConsoleService;
 use yew::utils::window;
+
+use crate::header::{parse_header, Header, HEADER_SIZE};
 
 type FnCB = Box<dyn FnMut(JsValue)>;
 
@@ -22,6 +25,9 @@ pub struct RecvPage {
     recv_ready: bool,
     received_bytes: usize,
     received: Vec<Uint8Array>,
+    qr_decoder: Rc<Quirc>,
+    file_size: u64,
+    file_name: String,
 }
 
 pub enum Msg {
@@ -29,6 +35,8 @@ pub enum Msg {
     InitVideo(MediaStream),
     VideoStart,
     Enqueue,
+    Waiting,
+    RecvFirstData(Vec<u8>),
     Recognized(Header, Uint8Array),
 }
 
@@ -38,6 +46,7 @@ impl RecvPage {
     }
 
     fn process(
+        mut decoder: Rc<Quirc>,
         link: ComponentLink<RecvPage>,
         video: HtmlVideoElement,
         context: CanvasRenderingContext2d,
@@ -62,17 +71,25 @@ impl RecvPage {
                     * 255.0) as u8;
             }
         }
-        let mut decoder = Quirc::default();
-        let codes = decoder.identify(w as usize, hi as usize, &gs);
+        let codes = Rc::make_mut(&mut decoder).identify(w as usize, hi as usize, &gs);
         for code in codes {
             let code = code.expect("failed to extract qr code");
             match code.decode() {
                 Ok(decoded) => {
                     let d = decoded.payload;
                     let header = parse_header(&d[..]);
-                    let buf = Uint8Array::new_with_length(header.size as u32);
-                    buf.copy_from(&d[HEADER_SIZE..HEADER_SIZE + header.size as usize]);
-                    link.send_message(Msg::Recognized(header, buf));
+                    ConsoleService::log(format!("{} {}", header.seq, header.size).as_ref());
+                    if header.seq == 0 {
+                        if header.size == 0 {
+                            link.send_message(Msg::Waiting);
+                        } else {
+                            link.send_message(Msg::RecvFirstData(d));
+                        }
+                    } else {
+                        let buf = Uint8Array::new_with_length(header.size as u32);
+                        buf.copy_from(&d[HEADER_SIZE..HEADER_SIZE + header.size as usize]);
+                        link.send_message(Msg::Recognized(header, buf));
+                    }
                 }
                 Err(e) => {
                     ConsoleService::log(format!("ERROR: {:?}", e).as_ref());
@@ -100,6 +117,7 @@ impl RecvPage {
             .dyn_into::<HtmlAnchorElement>()
             .unwrap();
         a.set_href(&url);
+        a.set_download(self.file_name.as_ref());
         a.click();
         Url::revoke_object_url(&url).unwrap();
     }
@@ -119,6 +137,9 @@ impl Component for RecvPage {
             recv_ready: false,
             received_bytes: 0,
             received: Vec::new(),
+            qr_decoder: Rc::new(Quirc::default()),
+            file_size: 0,
+            file_name: Default::default(),
         }
     }
 
@@ -127,6 +148,8 @@ impl Component for RecvPage {
             Msg::Start => {
                 self.start = true;
                 self.recv_ready = false;
+                self.file_size = 0;
+                self.file_name = Default::default();
                 self.received_bytes = 0;
                 self.received.clear();
                 let link = self.link.clone();
@@ -171,8 +194,16 @@ impl Component for RecvPage {
                     .unwrap()
                     .dyn_into::<CanvasRenderingContext2d>()
                     .unwrap();
+                let decoder = self.qr_decoder.clone();
                 let cb = Closure::wrap(Box::new(move || {
-                    RecvPage::process(link.clone(), video.clone(), context.clone(), vw, vh);
+                    RecvPage::process(
+                        decoder.clone(),
+                        link.clone(),
+                        video.clone(),
+                        context.clone(),
+                        vw,
+                        vh,
+                    );
                 }) as Box<dyn Fn()>);
                 self.timer_id = window()
                     .set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -182,22 +213,41 @@ impl Component for RecvPage {
                     .unwrap();
                 cb.forget();
             }
-            Msg::Recognized(header, buf) => {
-                if (header.seq == 0 && buf.length() == 0) || self.timer_id < 0 {
-                    if !self.recv_ready {
-                        self.recv_ready = true;
-                        return true;
+            Msg::Waiting => {
+                if !self.recv_ready {
+                    self.recv_ready = true;
+                    return true;
+                }
+                return false;
+            }
+            Msg::RecvFirstData(mut data) => {
+                if self.file_size == 0 && self.file_name.is_empty() {
+                    for i in 0..8 {
+                        self.file_size |= (data[HEADER_SIZE + i] as u64) << (i * 8);
                     }
+                    let decoder = TextDecoder::new().unwrap();
+                    let offset = HEADER_SIZE + 8;
+                    let nullpos = data[offset..].iter().position(|&x| x == 0).unwrap();
+                    self.file_name = decoder
+                        .decode_with_u8_array(&mut data[offset..offset + nullpos])
+                        .unwrap();
+                    return true;
+                } else {
                     return false;
                 }
-                if self.received.len() < header.seq as usize {
+            }
+            Msg::Recognized(header, buf) => {
+                if self.timer_id < 0 {
+                    return false;
+                }
+                if self.received.len() + 1 < header.seq as usize {
                     window().clear_timeout_with_handle(self.timer_id);
                     self.timer_id = -1;
                     let _ = window().alert_with_message("受信に失敗しました: シーケンス番号ずれ");
                     window().location().reload().unwrap();
                     return false;
                 }
-                if self.received.len() == header.seq as usize {
+                if self.received.len() + 1 == header.seq as usize {
                     self.received_bytes += buf.byte_length() as usize;
                     self.received.push(buf);
                     return true;
@@ -236,8 +286,10 @@ impl Component for RecvPage {
             "送信側のデータ送出を待機中...".to_string()
         } else {
             format!(
-                "{}バイト受信済み. 送受信QRコード数:{}",
+                "{}% ({}/{}) 送受信QRコード数:{}",
+                (self.received_bytes as f32 / self.file_size as f32 * 100.0) as i32,
                 self.received_bytes,
+                self.file_size,
                 self.received.len()
             )
         };
@@ -246,6 +298,13 @@ impl Component for RecvPage {
                 <div>
                     <button onclick={onclick} disabled={self.start}>{ "受信開始" }</button>
                 </div>
+                {
+                    if !self.file_name.is_empty() {
+                        html!{ <div>{ self.file_name.clone() }</div> }
+                    } else {
+                        html!{ <></> }
+                    }
+                }
                 <div>{ if self.start { &msg } else { "" } }</div>
                 <video ref=self.video_element.clone() muted={true} autoplay="true" onplay={onplay} style="display: none" />
                 <canvas ref=self.canvas_element.clone() style="display: none" />
