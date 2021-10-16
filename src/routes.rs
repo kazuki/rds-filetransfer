@@ -3,11 +3,11 @@ use yew_router::prelude::Switch;
 
 #[derive(Switch, Clone, Debug)]
 pub enum AppRoute {
-    #[to = "/send"]
+    #[to = "#/send"]
     Send,
-    #[to = "/receive"]
+    #[to = "#/receive"]
     Receive,
-    #[to = "/"]
+    #[to = "#/"]
     Home,
 }
 
